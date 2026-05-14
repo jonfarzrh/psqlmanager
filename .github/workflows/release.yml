@@ -1,0 +1,93 @@
+name: Release
+
+# Trigger: push a tag like `v0.1.1` (the leading `v` is required and is
+# stripped when comparing to the version in pyproject.toml).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-version:
+    name: tag matches pyproject version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        env:
+          # Routed through env so the tag value can't be re-interpreted by
+          # the shell (defense against malicious tag names).
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          pyproject_version=$(grep -m1 -E '^version[[:space:]]*=' pyproject.toml \
+                              | sed -E 's/.*"([^"]+)".*/\1/')
+          tag_version="${REF_NAME#v}"
+          if [ "$pyproject_version" != "$tag_version" ]; then
+            echo "::error::Tag ($tag_version) does not match pyproject version ($pyproject_version)."
+            exit 1
+          fi
+          echo "version=$pyproject_version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $pyproject_version"
+
+  test:
+    name: re-run CI on tagged commit
+    needs: verify-version
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: publish to PyPI
+    needs: [verify-version, test]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/psqlmanager
+    permissions:
+      id-token: write   # required for PyPI Trusted Publishing (OIDC)
+    steps:
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        # Pinned to the major release branch so we pick up bug fixes but
+        # not breaking changes. Trusted Publishing means no API token.
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: create GitHub release
+    needs: [verify-version, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create release with artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "$REF_NAME" dist/* \
+            --title "psqlmanager $VERSION" \
+            --generate-notes
