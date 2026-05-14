@@ -1,0 +1,10 @@
+# Code owners for this repository.
+#
+# Order matters: the LAST matching pattern wins. Anyone matched by the
+# pattern becomes a required reviewer on PRs that touch those paths,
+# *if* branch protection has "Require review from Code Owners" enabled.
+#
+# Without that enforcement rule this file just auto-requests review.
+
+# Default owner of everything in the repo.
+* @jonfarzrh
