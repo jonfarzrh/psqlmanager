@@ -1,0 +1,43 @@
+version: 2
+updates:
+  # Python runtime + dev dependencies declared in pyproject.toml.
+  # Using `pip` (not `uv`) for the ecosystem because pip's been the
+  # battle-tested option for years; switch to `uv` later if you want
+  # native uv.lock updates and Dependabot has matured the integration.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      # Coalesce minor/patch bumps of low-risk libraries into one PR.
+      runtime:
+        patterns:
+          - "click"
+          - "typer"
+          - "keyring"
+          - "cryptography"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions versions in .github/workflows/*.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
