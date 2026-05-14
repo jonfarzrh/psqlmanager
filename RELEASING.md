@@ -103,8 +103,8 @@ jobs:
     environment: testpypi
     permissions: { id-token: write }
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8
       - run: uv build
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
