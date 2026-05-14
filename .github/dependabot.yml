@@ -1,10 +1,9 @@
 version: 2
 updates:
-  # Python runtime + dev dependencies declared in pyproject.toml.
-  # Using `pip` (not `uv`) for the ecosystem because pip's been the
-  # battle-tested option for years; switch to `uv` later if you want
-  # native uv.lock updates and Dependabot has matured the integration.
-  - package-ecosystem: "pip"
+  # Python runtime + dev dependencies. The `uv` ecosystem reads
+  # pyproject.toml AND keeps uv.lock in sync, so Dependabot PRs land
+  # already-locked.
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
