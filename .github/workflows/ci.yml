@@ -33,6 +33,11 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
+          # Differentiate the cache per matrix entry so the five parallel
+          # jobs don't race to reserve the same key. Each Python version
+          # installs different wheels anyway, so per-version caches are
+          # the correct granularity.
+          cache-suffix: py${{ matrix.python-version }}
 
       - name: Pin Python ${{ matrix.python-version }}
         run: uv python pin ${{ matrix.python-version }}
