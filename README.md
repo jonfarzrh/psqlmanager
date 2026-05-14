@@ -17,12 +17,22 @@ appears in the agent's view of the terminal.
 ## Install
 
 ```sh
-uv tool install .
-# or, for development:
-uv sync
+# From PyPI:
+uv tool install psqlmanager
+# or
+pipx install psqlmanager
+# or
+pip install psqlmanager
 ```
 
 This installs a `psqlmanager` binary on your `PATH`.
+
+For local development against a checkout of this repo:
+
+```sh
+uv sync
+# now `uv run psqlmanager ...` uses the working tree
+```
 
 ## Quick start
 
