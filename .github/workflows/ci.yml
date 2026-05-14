@@ -48,9 +48,34 @@ jobs:
       - name: Run pytest
         run: uv run --frozen pytest -ra
 
+  security:
+    name: security (pip-audit + bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          cache-suffix: security
+
+      - name: Export runtime requirements
+        # `--no-dev` keeps the scope to what ships to users — a CVE in
+        # pytest shouldn't block a release. `--no-hashes` matches what
+        # pip-audit expects.
+        run: uv export --frozen --no-emit-project --no-dev --no-hashes > /tmp/runtime-requirements.txt
+
+      - name: pip-audit  (known CVEs in dependency tree)
+        run: uvx pip-audit --requirement /tmp/runtime-requirements.txt --strict
+
+      - name: bandit  (static analysis of src/, medium+ severity)
+        run: uvx bandit -r src/ -ll
+
   build:
     name: build sdist + wheel
-    needs: test
+    needs: [test, security]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
