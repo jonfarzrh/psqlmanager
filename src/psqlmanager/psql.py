@@ -97,3 +97,22 @@ def run_psql(
     env = build_env(cred, password, allow_write=allow_write)
     proc = subprocess.run(argv, env=env, stdin=sys.stdin)
     return proc.returncode
+
+
+def run_psql_capture(
+    cred: Credential,
+    password: str,
+    extra: Iterable[str] = (),
+    allow_write: bool = False,
+) -> tuple[int, str, str]:
+    """Run psql and capture stdout/stderr. Returns (returncode, stdout, stderr).
+
+    Used by `psqlmanager query --format json`, which needs to post-process
+    psql's CSV output. For streaming/interactive use, prefer run_psql.
+    """
+    import subprocess
+
+    argv = build_argv(cred, extra)
+    env = build_env(cred, password, allow_write=allow_write)
+    proc = subprocess.run(argv, env=env, capture_output=True, text=True)
+    return proc.returncode, proc.stdout, proc.stderr
