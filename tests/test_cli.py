@@ -606,6 +606,182 @@ def test_cache_clear_all(
 
 
 # ---------------------------------------------------------------------------
+# `query` convenience subcommand
+# ---------------------------------------------------------------------------
+
+
+def _capture_query_run(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Stub run_psql to capture args without invoking psql."""
+    captured: dict = {}
+
+    def fake_run(cred, password, extra, allow_write=False):
+        captured["extra"] = list(extra)
+        captured["password"] = password
+        captured["allow_write"] = allow_write
+        return 0
+
+    monkeypatch.setattr("psqlmanager.cli.run_psql", fake_run)
+    monkeypatch.setattr(psql_mod, "find_psql", lambda: "/usr/bin/psql")
+    return captured
+
+
+def test_query_table_format_wraps_sql_in_dash_c(
+    sandbox_home: Path, cli: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _capture_query_run(monkeypatch)
+    _run(cli, "init", "--passphrase", "--json")
+    _run(cli, "add", "prod", "--host", "h", "--user", "u", "--no-password", "--json")
+    result = _run(cli, "query", "prod", "select now()")
+    assert result.exit_code == 0
+    assert captured["extra"] == ["-c", "select now()"]
+
+
+def test_query_csv_format_adds_csv_flag(
+    sandbox_home: Path, cli: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = _capture_query_run(monkeypatch)
+    _run(cli, "init", "--passphrase", "--json")
+    _run(cli, "add", "prod", "--host", "h", "--user", "u", "--no-password", "--json")
+    result = _run(cli, "query", "prod", "select 1", "--format", "csv")
+    assert result.exit_code == 0
+    assert captured["extra"] == ["--csv", "-c", "select 1"]
+
+
+def test_query_json_format_parses_csv_output(
+    sandbox_home: Path, cli: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_capture(cred, password, extra, allow_write=False):
+        # Simulate psql's --csv output for `SELECT id, name FROM users`.
+        return 0, "id,name\n1,alice\n2,\"bob, jr\"\n", ""
+
+    monkeypatch.setattr("psqlmanager.cli.run_psql_capture", fake_capture)
+    monkeypatch.setattr(psql_mod, "find_psql", lambda: "/usr/bin/psql")
+
+    _run(cli, "init", "--passphrase", "--json")
+    _run(cli, "add", "prod", "--host", "h", "--user", "u", "--no-password", "--json")
+    result = _run(cli, "query", "prod", "select id,name from users", "--format", "json")
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data == [
+        {"id": "1", "name": "alice"},
+        {"id": "2", "name": "bob, jr"},
+    ]
+
+
+def test_query_json_format_empty_result(
+    sandbox_home: Path, cli: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Header-only CSV (no data rows) should produce an empty JSON array."""
+    monkeypatch.setattr(
+        "psqlmanager.cli.run_psql_capture",
+        lambda c, p, e, allow_write=False: (0, "id,name\n", ""),
+    )
+    monkeypatch.setattr(psql_mod, "find_psql", lambda: "/usr/bin/psql")
+    _run(cli, "init", "--passphrase", "--json")
+    _run(cli, "add", "prod", "--host", "h", "--user", "u", "--no-password", "--json")
+    result = _run(cli, "query", "prod", "select * from empty", "--format", "json")
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == []
+
+
+def test_query_json_format_propagates_psql_error(
+    sandbox_home: Path, cli: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_capture(cred, password, extra, allow_write=False):
+        return 1, "", 'psql: ERROR:  syntax error at or near "FROMM"\n'
+
+    monkeypatch.setattr("psqlmanager.cli.run_psql_capture", fake_capture)
+    monkeypatch.setattr(psql_mod, "find_psql", lambda: "/usr/bin/psql")
+    _run(cli, "init", "--passphrase", "--json")
+    _run(cli, "add", "prod", "--host", "h", "--user", "u", "--no-password", "--json")
+    result = _run(cli, "query", "prod", "select * FROMM users", "--format", "json")
+    assert result.exit_code == 1
+    assert "syntax error" in result.stderr
+    # No JSON should be emitted on error.
+    assert result.stdout == ""
+
+
+def test_query_on_readonly_credential_sets_pgoptions(
+    sandbox_home: Path, cli: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict = {}
+
+    def fake_run(cred, password, extra, allow_write=False):
+        captured["env"] = psql_mod.build_env(cred, password, allow_write=allow_write)
+        captured["allow_write"] = allow_write
+        return 0
+
+    monkeypatch.setattr("psqlmanager.cli.run_psql", fake_run)
+    monkeypatch.setattr(psql_mod, "find_psql", lambda: "/usr/bin/psql")
+
+    _run(cli, "init", "--passphrase", "--json")
+    _run(
+        cli, "add", "agent", "--host", "h", "--user", "u",
+        "--no-password", "--readonly", "--json",
+    )
+    result = _run(cli, "query", "agent", "select count(*) from t")
+    assert result.exit_code == 0
+    assert captured["allow_write"] is False
+    assert "default_transaction_read_only=on" in captured["env"]["PGOPTIONS"]
+
+
+def test_query_allow_write_overrides_readonly_and_warns(
+    sandbox_home: Path, cli: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict = {}
+
+    def fake_run(cred, password, extra, allow_write=False):
+        captured["env"] = psql_mod.build_env(cred, password, allow_write=allow_write)
+        captured["allow_write"] = allow_write
+        return 0
+
+    monkeypatch.setattr("psqlmanager.cli.run_psql", fake_run)
+    monkeypatch.setattr(psql_mod, "find_psql", lambda: "/usr/bin/psql")
+
+    _run(cli, "init", "--passphrase", "--json")
+    _run(
+        cli, "add", "agent", "--host", "h", "--user", "u",
+        "--no-password", "--readonly", "--json",
+    )
+    result = _run(
+        cli, "query", "--allow-write", "agent", "delete from staging.tmp"
+    )
+    assert result.exit_code == 0
+    assert captured["allow_write"] is True
+    assert "default_transaction_read_only" not in captured["env"].get("PGOPTIONS", "")
+    assert "WARNING" in result.stderr
+    assert "agent" in result.stderr
+
+
+def test_query_propagates_exit_code(
+    sandbox_home: Path, cli: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "psqlmanager.cli.run_psql",
+        lambda c, p, e, allow_write=False: 42,
+    )
+    monkeypatch.setattr(psql_mod, "find_psql", lambda: "/usr/bin/psql")
+    _run(cli, "init", "--passphrase", "--json")
+    _run(cli, "add", "prod", "--host", "h", "--user", "u", "--no-password", "--json")
+    result = _run(cli, "query", "prod", "select 1")
+    assert result.exit_code == 42
+
+
+def test_query_reports_missing_psql(
+    sandbox_home: Path, cli: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*_args, **_kwargs):
+        raise FileNotFoundError("psql executable not found on PATH.")
+
+    monkeypatch.setattr("psqlmanager.cli.run_psql", boom)
+    _run(cli, "init", "--passphrase", "--json")
+    _run(cli, "add", "prod", "--host", "h", "--user", "u", "--no-password", "--json")
+    result = _run(cli, "query", "prod", "select 1")
+    assert result.exit_code == EXIT_NO_PSQL
+    assert "psql executable not found" in result.stderr
+
+
+# ---------------------------------------------------------------------------
 # Read-only enforcement
 # ---------------------------------------------------------------------------
 

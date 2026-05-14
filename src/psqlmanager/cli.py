@@ -34,7 +34,7 @@ from .auth import (
     list_cache,
     resolve_password,
 )
-from .psql import find_psql, exec_psql, run_psql
+from .psql import find_psql, exec_psql, run_psql, run_psql_capture
 from .store import (
     PASSPHRASE_ENV,
     Credential,
@@ -65,6 +65,14 @@ class AuthMethod(str, Enum):
     iam_rds = "iam-rds"
     iam_gcp = "iam-gcp"
     iam_azure = "iam-azure"
+
+
+class OutputFormat(str, Enum):
+    """Output formats supported by `psqlmanager query --format`."""
+
+    table = "table"  # psql's default aligned-table output
+    csv = "csv"      # RFC-4180 CSV via psql --csv
+    json = "json"    # csv post-processed to a JSON array of objects
 
 
 # Sanity check: keep the Enum and the auth module's SUPPORTED_METHODS in sync.
@@ -722,6 +730,68 @@ def exec_cmd(
     cred, password = _load_and_authenticate(name, passphrase)
     _warn_if_overriding_readonly(cred, allow_write)
     extra = _strip_leading_separator(tuple(psql_args or ()))
+    try:
+        rc = run_psql(cred, password, extra, allow_write=allow_write)
+    except FileNotFoundError as e:
+        _fail(str(e), code="no_psql", json_mode=False, exit_code=EXIT_NO_PSQL)
+    raise typer.Exit(code=rc)
+
+
+@main.command()
+def query(
+    name: Annotated[str, typer.Argument(help="Credential name.")],
+    sql: Annotated[str, typer.Argument(help="SQL statement to run.")],
+    fmt: Annotated[
+        OutputFormat,
+        typer.Option(
+            "--format",
+            help="Output format: psql's aligned table, CSV, or JSON (rows as objects).",
+        ),
+    ] = OutputFormat.table,
+    allow_write: Annotated[
+        bool,
+        typer.Option(
+            "--allow-write",
+            help="Bypass the credential's read-only protection for this invocation.",
+        ),
+    ] = False,
+    passphrase: PassphraseOpt = None,
+) -> None:
+    """Run a single SQL statement and print the result.
+
+    Convenience wrapper around `exec NAME -- -c SQL`. Reach for `exec`
+    directly when you need psql features beyond a single statement —
+    running a SQL file with -f, psql meta-commands like \\copy, multi-
+    statement transactions, etc.
+
+    For agent workflows, `--format json` returns a JSON array of row
+    objects parsed from psql's CSV output, which avoids having agents
+    learn psql's tabular formatting.
+    """
+    cred, password = _load_and_authenticate(name, passphrase)
+    _warn_if_overriding_readonly(cred, allow_write)
+
+    if fmt is OutputFormat.json:
+        # Capture --csv output and re-emit as JSON. csv.DictReader handles
+        # RFC-4180 quoting/escaping correctly. NULLs come through as empty
+        # strings (psql --csv limitation) — documented in the README.
+        try:
+            rc, out, err = run_psql_capture(
+                cred, password, ("--csv", "-c", sql), allow_write=allow_write
+            )
+        except FileNotFoundError as e:
+            _fail(str(e), code="no_psql", json_mode=False, exit_code=EXIT_NO_PSQL)
+        if err:
+            click.echo(err, err=True, nl=False)
+        if rc == 0:
+            import csv
+            import io
+
+            rows = list(csv.DictReader(io.StringIO(out)))
+            click.echo(json.dumps(rows, indent=2))
+        raise typer.Exit(code=rc)
+
+    extra = ("-c", sql) if fmt is OutputFormat.table else ("--csv", "-c", sql)
     try:
         rc = run_psql(cred, password, extra, allow_write=allow_write)
     except FileNotFoundError as e:

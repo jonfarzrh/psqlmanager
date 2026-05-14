@@ -10,9 +10,10 @@ Modern dev workflows hand the terminal to AI coding agents that should be able
 to query a database but **should not** see the password. `psqlmanager` keeps
 credentials in an encrypted file at `~/.local/share/psqlmanager/creds.json`
 (mode `0600`), with the master key in the OS keyring. An agent invokes
-`psqlmanager exec prod -- -c "select ..."`; the password is read from the
-keyring, passed to `psql` through `PGPASSWORD` in a child env, and never
-appears in the agent's view of the terminal.
+`psqlmanager query prod "select ..." --format json` and gets a JSON array of
+rows back; the password is read from the keyring, passed to `psql` through
+`PGPASSWORD` in a child env, and never appears in the agent's view of the
+terminal.
 
 ## Install
 
@@ -52,8 +53,14 @@ psqlmanager add staging --url "postgres://user:pw@host:5432/db?sslmode=require"
 # Interactive shell:
 psqlmanager connect prod
 
-# One-shot query (anything after `--` is forwarded to psql):
+# One-shot SQL (the easy way — psql's -c is added for you):
+psqlmanager query prod "select now()"
+psqlmanager query prod "select id, name from users" --format json
+
+# Raw psql passthrough (when you need -f / \copy / multi-statement /
+# psql meta-commands — anything after NAME is forwarded verbatim):
 psqlmanager exec prod -- -c "select now()"
+psqlmanager exec prod -- -f migrations/0042.sql
 ```
 
 ## Giving an AI agent database access
@@ -70,7 +77,8 @@ psqlmanager add agent-prod \
     --readonly < ~/.secrets/analytics_ro
 
 # The agent then runs queries by name only — never sees the password:
-psqlmanager exec agent-prod -- -c "select count(*) from orders"
+psqlmanager query agent-prod "select count(*) from orders" --format json
+# -> [{"count": "1234"}]
 ```
 
 Under the hood, `--readonly` sets `PGOPTIONS=-c default_transaction_read_only=on`
@@ -84,7 +92,7 @@ If a human needs to issue a one-off write against a read-only credential,
 the override is intentionally noisy:
 
 ```sh
-psqlmanager exec --allow-write agent-prod -- -c "delete from staging.tmp"
+psqlmanager query --allow-write agent-prod "delete from staging.tmp"
 # stderr: WARNING: --allow-write is overriding read-only protection on credential 'agent-prod'...
 ```
 
@@ -105,7 +113,8 @@ it's visible in transcripts and easy to assert on in audit logs.
 | `rm NAME`                       | Delete a credential. |
 | `rename OLD NEW`                | Rename a credential. |
 | `connect [--allow-write] NAME [-- ...]` | Exec into an interactive psql shell. |
-| `exec [--allow-write] NAME [-- ...]`    | Run psql once and propagate its exit code. |
+| `exec [--allow-write] NAME [-- ...]`    | Run psql once with raw args; everything after NAME is forwarded to psql verbatim. |
+| `query [--allow-write] [--format ...] NAME SQL` | Run a single SQL statement; convenience wrapper that adds psql's `-c`. `--format table|csv|json`. |
 | `cache list [--json]`           | Show cached IAM tokens and remaining TTL. |
 | `cache clear [NAME] [--json]`   | Clear one or all cached IAM tokens. |
 | `info [--json]`                 | Show store path, mode, permissions, entry count. |
