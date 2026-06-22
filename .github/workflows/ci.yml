@@ -26,7 +26,7 @@ jobs:
         # cross-platform. Expand to macos-latest / windows-latest here once
         # there's a need; the mocks make it free.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
@@ -52,7 +52,7 @@ jobs:
     name: security (pip-audit + bandit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
@@ -78,7 +78,7 @@ jobs:
     needs: [test, security]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
