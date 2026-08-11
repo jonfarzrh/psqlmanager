@@ -19,7 +19,6 @@ updates:
       # Coalesce minor/patch bumps of low-risk libraries into one PR.
       runtime:
         patterns:
-          - "click"
           - "typer"
           - "keyring"
           - "cryptography"
