@@ -22,7 +22,6 @@ from enum import Enum
 from typing import Annotated, Any, Optional
 from urllib.parse import unquote, urlparse
 
-import click
 import typer
 
 from . import __version__
@@ -86,19 +85,19 @@ assert tuple(m.value for m in AuthMethod) == SUPPORTED_METHODS
 
 def _emit(obj: Any, *, json_mode: bool, human: str | None = None) -> None:
     if json_mode:
-        click.echo(json.dumps(obj, indent=2, sort_keys=True))
+        typer.echo(json.dumps(obj, indent=2, sort_keys=True))
     elif human is not None:
-        click.echo(human)
+        typer.echo(human)
 
 
 def _fail(message: str, *, code: str, json_mode: bool, exit_code: int) -> None:
     if json_mode:
-        click.echo(
+        typer.echo(
             json.dumps({"error": message, "code": code}, sort_keys=True),
             err=True,
         )
     else:
-        click.echo(f"error: {message}", err=True)
+        typer.echo(f"error: {message}", err=True)
     raise typer.Exit(code=exit_code)
 
 
@@ -129,7 +128,7 @@ def _resolve_password_input(
     if env_pw is not None:
         return env_pw
     if sys.stdin.isatty():
-        return click.prompt(interactive_label, hide_input=True, default="", show_default=False)
+        return typer.prompt(interactive_label, hide_input=True, default="", show_default=False)
     return ""
 
 
@@ -166,7 +165,7 @@ def _parse_url(url: str) -> dict[str, Any]:
 
 def _version_callback(value: bool) -> None:
     if value:
-        click.echo(f"psqlmanager {__version__}")
+        typer.echo(f"psqlmanager {__version__}")
         raise typer.Exit()
 
 
@@ -230,7 +229,7 @@ def init(
         if env_pw:
             passphrase = env_pw
         elif sys.stdin.isatty():
-            passphrase = click.prompt(
+            passphrase = typer.prompt(
                 "Set master passphrase",
                 hide_input=True,
                 confirmation_prompt="Confirm master passphrase",
@@ -290,19 +289,19 @@ def info(
             payload["error"] = str(e)
 
     if json_mode:
-        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
 
-    click.echo(f"path:        {payload['path']}")
-    click.echo(f"exists:      {payload['exists']}")
+    typer.echo(f"path:        {payload['path']}")
+    typer.echo(f"exists:      {payload['exists']}")
     if payload["exists"]:
-        click.echo(f"permissions: {payload['permissions']}")
+        typer.echo(f"permissions: {payload['permissions']}")
         if "mode" in payload:
-            click.echo(f"mode:        {payload['mode']}")
-            click.echo(f"count:       {payload['count']}")
+            typer.echo(f"mode:        {payload['mode']}")
+            typer.echo(f"count:       {payload['count']}")
         elif payload.get("locked"):
-            click.echo(f"locked:      yes ({payload['lock_reason']})")
-    click.echo(f"psql:        {payload['psql_path'] or 'not found on PATH'}")
+            typer.echo(f"locked:      yes ({payload['lock_reason']})")
+    typer.echo(f"psql:        {payload['psql_path'] or 'not found on PATH'}")
 
 
 @main.command()
@@ -327,7 +326,7 @@ def destroy(
                 json_mode=json_mode,
                 exit_code=EXIT_GENERIC,
             )
-        click.confirm(
+        typer.confirm(
             f"Permanently delete {store.path} and the keyring entry?",
             abort=True,
         )
@@ -518,7 +517,7 @@ def list_cmd(
 
     names = store.list_names()
     if json_mode:
-        click.echo(
+        typer.echo(
             json.dumps(
                 {"credentials": [store.get(n).public_dict(reveal=False) for n in names]},
                 indent=2,
@@ -528,13 +527,13 @@ def list_cmd(
         return
 
     if not names:
-        click.echo("(no credentials)")
+        typer.echo("(no credentials)")
         return
     for n in names:
         c = store.get(n)
         target = f"{c.user + '@' if c.user else ''}{c.host}:{c.port}/{c.dbname or ''}".rstrip("/")
         flag = " [ro]" if c.readonly else ""
-        click.echo(f"{n}\t{target}{flag}")
+        typer.echo(f"{n}\t{target}{flag}")
 
 
 @main.command()
@@ -561,11 +560,11 @@ def show(
 
     data = cred.public_dict(reveal=reveal)
     if json_mode:
-        click.echo(json.dumps(data, indent=2, sort_keys=True))
+        typer.echo(json.dumps(data, indent=2, sort_keys=True))
         return
     width = max(len(k) for k in data)
     for k in sorted(data):
-        click.echo(f"{k.ljust(width)}  {data[k]}")
+        typer.echo(f"{k.ljust(width)}  {data[k]}")
 
 
 @main.command()
@@ -647,7 +646,7 @@ def _load_and_authenticate(name: str, passphrase: str | None) -> tuple[Credentia
 
 def _warn_if_overriding_readonly(cred: Credential, allow_write: bool) -> None:
     if cred.readonly and allow_write:
-        click.echo(
+        typer.echo(
             f"WARNING: --allow-write is overriding read-only protection on credential "
             f"{cred.name!r}. This invocation can issue INSERT/UPDATE/DELETE/DDL.",
             err=True,
@@ -782,13 +781,13 @@ def query(
         except FileNotFoundError as e:
             _fail(str(e), code="no_psql", json_mode=False, exit_code=EXIT_NO_PSQL)
         if err:
-            click.echo(err, err=True, nl=False)
+            typer.echo(err, err=True, nl=False)
         if rc == 0:
             import csv
             import io
 
             rows = list(csv.DictReader(io.StringIO(out)))
-            click.echo(json.dumps(rows, indent=2))
+            typer.echo(json.dumps(rows, indent=2))
         raise typer.Exit(code=rc)
 
     extra = ("-c", sql) if fmt is OutputFormat.table else ("--csv", "-c", sql)
@@ -818,15 +817,15 @@ def cache_list_cmd(
     """Show cached tokens and their remaining TTL."""
     entries = list_cache()
     if json_mode:
-        click.echo(json.dumps({"cache": entries}, indent=2, sort_keys=True))
+        typer.echo(json.dumps({"cache": entries}, indent=2, sort_keys=True))
         return
     if not entries:
-        click.echo("(cache empty)")
+        typer.echo("(cache empty)")
         return
     for e in entries:
         ttl = e["expires_in_seconds"]
         status = "EXPIRED" if e["expired"] else f"{ttl}s left"
-        click.echo(f"{e['name']}\t{e['method']}\t{status}")
+        typer.echo(f"{e['name']}\t{e['method']}\t{status}")
 
 
 @cache_app.command("clear")
